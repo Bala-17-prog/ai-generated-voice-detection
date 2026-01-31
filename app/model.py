@@ -1,40 +1,47 @@
-import numpy as np
 import librosa
+import numpy as np
 
-def extract_features(audio_path):
+def predict_voice(audio_path: str):
     y, sr = librosa.load(audio_path, sr=None)
 
+    # --- Feature extraction ---
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
     mfcc_mean = np.mean(mfcc)
+    mfcc_var = np.var(mfcc)
 
-    zcr = np.mean(librosa.feature.zero_crossing_rate(y))
+    spectral_flatness = np.mean(librosa.feature.spectral_flatness(y=y))
     spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
 
-    return mfcc_mean, zcr, spectral_centroid
+    zcr = librosa.feature.zero_crossing_rate(y)
+    zcr_var = np.var(zcr)
 
+    rms = librosa.feature.rms(y=y)
+    rms_var = np.var(rms)
 
-def predict_voice(audio_path):
-    mfcc, zcr, centroid = extract_features(audio_path)
+    # --- Heuristic scoring ---
+    ai_score = 0
 
-    # Simple but effective heuristic
-    score = 0
+    if spectral_flatness < 0.15:
+        ai_score += 1
+    if mfcc_var < 200:
+        ai_score += 1
+    if zcr_var < 0.001:
+        ai_score += 1
+    if rms_var < 0.01:
+        ai_score += 1
 
-    if mfcc < -200:
-        score += 1
-    if zcr > 0.08:
-        score += 1
-    if centroid > 3000:
-        score += 1
-
-    if score >= 2:
-        return {
-            "classification": "AI-generated",
-            "confidence": 0.75,
-            "explanation": "Audio shows synthetic characteristics (high spectral centroid / unnatural MFCC patterns)"
-        }
+    # --- Final decision ---
+    if ai_score >= 2:
+        classification = "AI_GENERATED"
+        confidence = min(0.6 + ai_score * 0.1, 0.95)
+        explanation = "Spectral smoothness and low variance indicate synthetic speech"
     else:
-        return {
-            "classification": "Human",
-            "confidence": 0.80,
-            "explanation": "Audio patterns match natural human speech"
-        }
+        classification = "HUMAN"
+        confidence = min(0.6 + (4 - ai_score) * 0.1, 0.95)
+        explanation = "Natural variation in pitch and energy suggests human speech"
+
+    return {
+        "classification": classification,
+        "confidence": round(confidence, 2),
+        "explanation": explanation
+    }
