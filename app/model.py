@@ -3,12 +3,6 @@ import numpy as np
 
 
 def predict_voice(audio_path: str):
-    """
-    Predict whether the given audio is AI-generated or Human.
-    Returns classification, confidence, and explanation.
-    """
-
-    # Load audio
     y, sr = librosa.load(audio_path, sr=None)
 
     # ---- Feature Extraction ----
@@ -18,63 +12,60 @@ def predict_voice(audio_path: str):
     spectral_bandwidth = np.mean(librosa.feature.spectral_bandwidth(y=y, sr=sr))
     spectral_flatness = np.mean(librosa.feature.spectral_flatness(y=y))
 
-    # Pitch analysis
-    pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+    pitches, _ = librosa.piptrack(y=y, sr=sr)
     pitch_values = pitches[pitches > 0]
     pitch_std = np.std(pitch_values) if len(pitch_values) > 0 else 0.0
 
-    # ---- Base Scoring ----
+    # ---- Scores ----
     ai_score = 0.0
     human_score = 0.0
 
-    # AI voice traits
-    if spectral_flatness < 0.25:
-        ai_score += 0.25
-    if pitch_std < 15:
-        ai_score += 0.25
-    if zcr < 0.04:
+    # AI indicators (WEAKENED)
+    if spectral_flatness < 0.18:
         ai_score += 0.2
-    if spectral_bandwidth < 1800:
+    if pitch_std < 8:
+        ai_score += 0.2
+    if spectral_bandwidth < 1400:
         ai_score += 0.2
 
-    # Human voice traits
-    if pitch_std > 20:
+    # HUMAN indicators (STRENGTHENED)
+    if pitch_std > 15:
+        human_score += 0.4
+    if spectral_bandwidth > 1800:
         human_score += 0.3
-    if spectral_bandwidth > 2000:
-        human_score += 0.3
-    if zcr > 0.05:
+    if zcr > 0.04:
         human_score += 0.2
-    if rms > 0.03:
-        human_score += 0.2
+    if rms > 0.02:
+        human_score += 0.1
 
-    # ---- Initial Decision ----
-    if ai_score > human_score:
-        classification = "AI_GENERATED"
-        confidence = min(0.6 + ai_score, 0.95)
-        explanation = (
-            "Consistent pitch patterns, low spectral flatness, and reduced temporal variability "
-            "suggest synthetic voice generation."
-        )
-    else:
+    # ---- Decision ----
+    if human_score >= ai_score:
         classification = "HUMAN"
         confidence = min(0.6 + human_score, 0.95)
         explanation = (
-            "Natural pitch variations, wider spectral bandwidth, and irregular temporal dynamics "
+            "Natural pitch variation, broader spectral bandwidth, and temporal irregularities "
             "indicate human speech."
         )
+    else:
+        classification = "AI_GENERATED"
+        confidence = min(0.6 + ai_score, 0.95)
+        explanation = (
+            "Stable pitch, reduced spectral variability, and uniform signal patterns "
+            "suggest AI-generated voice."
+        )
 
-    # ---- AI-Bias Heuristic (IMPORTANT FIX) ----
-    # Catch high-quality AI voices misclassified as human
+    # ---- STRONG AI FALLBACK ONLY ----
     if (
         classification == "HUMAN"
-        and confidence > 0.8
-        and (spectral_flatness < 0.2 or pitch_std < 10)
+        and pitch_std < 6
+        and spectral_flatness < 0.15
+        and spectral_bandwidth < 1200
     ):
         classification = "AI_GENERATED"
-        confidence = round(confidence - 0.15, 2)
+        confidence = round(confidence - 0.1, 2)
         explanation = (
-            "Although resembling human speech, unnaturally stable pitch and spectral consistency "
-            "indicate high-quality AI-generated voice."
+            "Despite human-like qualities, extremely stable pitch and spectral consistency "
+            "indicate high-confidence AI-generated voice."
         )
 
     return {
