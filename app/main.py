@@ -1,25 +1,24 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from app.model import predict_voice
 import base64
 import tempfile
 import os
-import uuid
 
 app = FastAPI(
     title="AI Generated Voice Detection API",
-    description="Detects whether a voice sample is AI-generated or Human using audio signal analysis.",
+    description="Detects whether a voice sample is AI-generated or Human",
     version="1.0.0"
 )
 
+# ✅ REQUEST MODEL (MATCHES GUVI TESTER EXACTLY)
+class DetectVoiceRequest(BaseModel):
+    language: str
+    audioFormat: str
+    audioBase64: str
 
-class AudioBase64Request(BaseModel):
-    audio_base64: str = Field(
-        ...,
-        description="Base64-encoded MP3 audio string (without or with data:audio/*;base64 prefix)"
-    )
 
-
+# ✅ HEALTH CHECK (REQUIRED)
 @app.get("/")
 def health_check():
     return {
@@ -28,14 +27,16 @@ def health_check():
     }
 
 
+# ✅ MAIN ENDPOINT
 @app.post("/detect-voice")
-async def detect_voice(request: AudioBase64Request):
-    # 1️⃣ Clean Base64 (remove data URI if present)
+async def detect_voice(request: DetectVoiceRequest):
     try:
-        audio_base64 = request.audio_base64
+        # Remove data URI prefix if present
+        audio_base64 = request.audioBase64
         if "," in audio_base64:
             audio_base64 = audio_base64.split(",")[1]
 
+        # Decode Base64
         audio_bytes = base64.b64decode(audio_base64)
     except Exception:
         raise HTTPException(
@@ -43,28 +44,29 @@ async def detect_voice(request: AudioBase64Request):
             detail="Invalid Base64 audio input"
         )
 
-    # 2️⃣ Save temp MP3 file
-    temp_file_path = f"{uuid.uuid4()}.mp3"
+    # Save temp audio file
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=f".{request.audioFormat}"
+    ) as temp_audio:
+        temp_audio.write(audio_bytes)
+        temp_audio_path = temp_audio.name
+
     try:
-        with open(temp_file_path, "wb") as f:
-            f.write(audio_bytes)
-
-        # 3️⃣ Run prediction
-        result = predict_voice(temp_file_path)
-
+        # Run model
+        result = predict_voice(temp_audio_path)
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Audio processing failed: {str(e)}"
+            detail=str(e)
         )
-
     finally:
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
 
-    # 4️⃣ Return hackathon-compliant response
+    # ✅ HACKATHON-COMPLIANT RESPONSE
     return {
-        "result": result["classification"],   # AI_GENERATED or HUMAN
-        "confidence": float(result["confidence"]),  # 0.0 – 1.0
+        "result": result["classification"],  # AI_GENERATED or HUMAN
+        "confidence": float(result["confidence"]),  # 0.0–1.0
         "explanation": result["explanation"]
     }
